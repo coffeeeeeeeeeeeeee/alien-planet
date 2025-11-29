@@ -16,6 +16,8 @@ const Tile = {
 	PowerBlock: 7,
 	WormChunk: 8,
 	Vegetation: 9,
+	CityWall: 10,
+	CityFloor: 11,
 };
 
 const Tile_Names = {
@@ -26,6 +28,8 @@ const Tile_Names = {
 	[Tile.Soil]: "Subsuelo",
 	[Tile.Diamond]: "Diamante",
 	[Tile.WormChunk]: "Carne de Gusano",
+	[Tile.CityWall]: "City Wall",
+	[Tile.CityFloor]: "City Floor",
 };
 
 const Tile_Properties = {
@@ -38,6 +42,8 @@ const Tile_Properties = {
 	[Tile.PowerBlock]:     { color: '#8b8bd0', maxHp: 200 },
 	[Tile.WormChunk]:      { color: '#C70039', maxHp: 0,   sides: 8 },
 	[Tile.Vegetation]:     { color: '#84398c', maxHp: 1 },
+	[Tile.CityWall]:       { color: '#4a4a6a', maxHp: 500, sides: 4 },
+	[Tile.CityFloor]:      { color: '#3a3a5a', maxHp: 400, sides: 4 },
 };
 
 
@@ -217,12 +223,22 @@ class Game {
 
 	RADAR_RADIUS = 80;
 	RADAR_MARGIN = 20;
-	RADAR_BG_COLOR = 'rgba(0, 255, 0, 0.15)';
+	RADAR_BG_COLOR = '#0a1a0a';
 	RADAR_LINE_COLOR = 'rgba(0, 255, 0, 0.5)';
 	RADAR_BLIP_COLOR = '#00FF00';
 	RADAR_ARROW_RADIUS_OFFSET = 15;
 	RADAR_ARROW_SIZE = 12;
 	RADAR_ARROW_COLOR = 'rgba(0, 255, 0, 0.7)';
+	RADAR_ENEMY_COLOR = '#FF4444';
+
+	CITY_LAYER = 100;
+	CITY_HEIGHT = 30;
+	CITY_ROOM_MIN_SIZE = 6;
+	CITY_ROOM_MAX_SIZE = 12;
+	CITY_CORRIDOR_WIDTH = 3;
+	CITY_ROOMS_COUNT = 8;
+	CITY_WIDTH = 150;
+	cityRooms = null;
 
 	engine = null;
 	state = Game_State.Menu;
@@ -263,6 +279,8 @@ class Game {
 		[Tile.Brick]: 3,
 		[Tile.Soil]: 4,
 		[Tile.PowerBlock]: 5,
+		[Tile.CityWall]: 3,
+		[Tile.CityFloor]: 4,
 	};
 
 	camera = {
@@ -1107,12 +1125,113 @@ class Game {
 		}
 	}
 
+	generateCityRooms() {
+		if (this.cityRooms) return;
+		
+		const rooms = [];
+		const cityStartX = -Math.floor(this.CITY_WIDTH / 2);
+		const cityEndX = Math.floor(this.CITY_WIDTH / 2);
+		
+		for (let i = 0; i < this.CITY_ROOMS_COUNT; i++) {
+			const roomWidth = this.CITY_ROOM_MIN_SIZE + Math.floor(Math.random() * (this.CITY_ROOM_MAX_SIZE - this.CITY_ROOM_MIN_SIZE));
+			const roomHeight = this.CITY_ROOM_MIN_SIZE + Math.floor(Math.random() * (this.CITY_ROOM_MAX_SIZE - this.CITY_ROOM_MIN_SIZE));
+			const roomX = cityStartX + Math.floor(Math.random() * (this.CITY_WIDTH - roomWidth));
+			const roomY = this.CITY_LAYER + 2 + Math.floor(Math.random() * (this.CITY_HEIGHT - roomHeight - 4));
+			
+			rooms.push({ x: roomX, y: roomY, width: roomWidth, height: roomHeight, centerX: roomX + Math.floor(roomWidth / 2), centerY: roomY + Math.floor(roomHeight / 2) });
+		}
+		
+		rooms.sort((a, b) => a.centerX - b.centerX);
+		
+		const corridors = [];
+		for (let i = 0; i < rooms.length - 1; i++) {
+			const roomA = rooms[i];
+			const roomB = rooms[i + 1];
+			corridors.push({ x1: roomA.centerX, y1: roomA.centerY, x2: roomB.centerX, y2: roomB.centerY });
+		}
+		
+		this.cityRooms = { rooms, corridors, startX: cityStartX, endX: cityEndX };
+	}
+
+	getCityTileAt(gridX, gridY) {
+		if (gridY < this.CITY_LAYER || gridY >= this.CITY_LAYER + this.CITY_HEIGHT) return null;
+		
+		this.generateCityRooms();
+		const { rooms, corridors, startX, endX } = this.cityRooms;
+		
+		if (gridX < startX - 2 || gridX > endX + 2) return null;
+		
+		const isInRoom = rooms.some(room => 
+			gridX >= room.x && gridX < room.x + room.width &&
+			gridY >= room.y && gridY < room.y + room.height
+		);
+		
+		const isInCorridor = corridors.some(corridor => {
+			const halfWidth = Math.floor(this.CITY_CORRIDOR_WIDTH / 2);
+			
+			const minX = Math.min(corridor.x1, corridor.x2);
+			const maxX = Math.max(corridor.x1, corridor.x2);
+			if (gridX >= minX - halfWidth && gridX <= maxX + halfWidth && 
+				gridY >= corridor.y1 - halfWidth && gridY <= corridor.y1 + halfWidth) {
+				return true;
+			}
+			
+			const minY = Math.min(corridor.y1, corridor.y2);
+			const maxY = Math.max(corridor.y1, corridor.y2);
+			if (gridX >= corridor.x2 - halfWidth && gridX <= corridor.x2 + halfWidth &&
+				gridY >= minY - halfWidth && gridY <= maxY + halfWidth) {
+				return true;
+			}
+			
+			return false;
+		});
+		
+		if (isInRoom || isInCorridor) {
+			return { type: Tile.Empty, hp: 0 };
+		}
+		
+		const isRoomWall = rooms.some(room => 
+			gridX >= room.x - 1 && gridX < room.x + room.width + 1 &&
+			gridY >= room.y - 1 && gridY < room.y + room.height + 1
+		);
+		
+		const isCorridorWall = corridors.some(corridor => {
+			const halfWidth = Math.floor(this.CITY_CORRIDOR_WIDTH / 2) + 1;
+			
+			const minX = Math.min(corridor.x1, corridor.x2);
+			const maxX = Math.max(corridor.x1, corridor.x2);
+			if (gridX >= minX - halfWidth && gridX <= maxX + halfWidth && 
+				gridY >= corridor.y1 - halfWidth - 1 && gridY <= corridor.y1 + halfWidth + 1) {
+				return true;
+			}
+			
+			const minY = Math.min(corridor.y1, corridor.y2);
+			const maxY = Math.max(corridor.y1, corridor.y2);
+			if (gridX >= corridor.x2 - halfWidth - 1 && gridX <= corridor.x2 + halfWidth + 1 &&
+				gridY >= minY - halfWidth && gridY <= maxY + halfWidth) {
+				return true;
+			}
+			
+			return false;
+		});
+		
+		if (isRoomWall || isCorridorWall) {
+			const props = Tile_Properties[Tile.CityWall];
+			return { ...props, type: Tile.CityWall, hp: props.maxHp, maxHp: props.maxHp };
+		}
+		
+		return null;
+	}
+
 	getTileAt(gridX, gridY) {
 		const key = `${gridX},${gridY}`;
 		if (this.tileChanges[key]) {
 			if (this.tileChanges[key].hp <= 0) return { type: Tile.Empty, hp: 0 };
 			return this.tileChanges[key];
 		}
+
+		const cityTile = this.getCityTileAt(gridX, gridY);
+		if (cityTile !== null) return cityTile;
 
 		const surfaceLevel = 10;
 		const surfaceVariation = 4;
@@ -1509,7 +1628,6 @@ class Game {
 				this.engine.drawText(this.inventory[type].toString(), 16, Color.WHITE, textPos, "right");
 			});
 		}
-
 		this.drawRadar();
 	}
 
@@ -1524,8 +1642,43 @@ class Game {
 		this.engine.drawCircleLines(centerPos, this.RADAR_RADIUS, 2, this.RADAR_LINE_COLOR);
 		this.engine.drawCircleLines(centerPos, this.RADAR_RADIUS * 0.66, 1, this.RADAR_LINE_COLOR);
 		this.engine.drawCircleLines(centerPos, this.RADAR_RADIUS * 0.33, 1, this.RADAR_LINE_COLOR);
-		this.engine.drawLine({x: radarCenterX - this.RADAR_RADIUS, y: radarCenterY}, {x: radarCenterX + this.RADAR_RADIUS, y: radarCenterY}, 1, this.RADAR_LINE_COLOR);
-		this.engine.drawLine({x: radarCenterX, y: radarCenterY - this.RADAR_RADIUS}, {x: radarCenterX, y: radarCenterY + this.RADAR_RADIUS}, 1, this.RADAR_LINE_COLOR);
+		
+		this.engine.drawLine(
+			{ x: radarCenterX - this.RADAR_RADIUS, y: radarCenterY },
+			{ x: radarCenterX + this.RADAR_RADIUS, y: radarCenterY },
+			1, this.RADAR_LINE_COLOR
+		);
+		this.engine.drawLine(
+			{ x: radarCenterX, y: radarCenterY - this.RADAR_RADIUS },
+			{ x: radarCenterX, y: radarCenterY + this.RADAR_RADIUS },
+			1, this.RADAR_LINE_COLOR
+		);
+
+		const scaleFactor = this.RADAR_RADIUS / this.radarRange;
+		const tileStep = 3;
+		const playerGridX = Math.floor(this.player.x / this.TILE_SIZE);
+		const playerGridY = Math.floor(this.player.y / this.TILE_SIZE);
+		const radarTileRange = Math.ceil(this.radarRange / this.TILE_SIZE);
+		
+		for (let dy = -radarTileRange; dy <= radarTileRange; dy += tileStep) {
+			for (let dx = -radarTileRange; dx <= radarTileRange; dx += tileStep) {
+				const gridX = playerGridX + dx;
+				const gridY = playerGridY + dy;
+				const tile = this.getTileAt(gridX, gridY);
+				
+				if (tile && tile.type !== Tile.Empty) {
+					const worldDx = dx * this.TILE_SIZE;
+					const worldDy = dy * this.TILE_SIZE;
+					const distance = Math.sqrt(worldDx * worldDx + worldDy * worldDy);
+					
+					if (distance < this.radarRange) {
+						const blipX = radarCenterX + worldDx * scaleFactor;
+						const blipY = radarCenterY + worldDy * scaleFactor;
+						this.engine.drawRectangle({ x: blipX - 1, y: blipY - 1, width: 2, height: 2 }, 'rgba(80, 130, 80, 0.7)');
+					}
+				}
+			}
+		}
 
 		this.powerBlocks.forEach(block => {
 			const blockWorldX = block.x * this.TILE_SIZE + this.TILE_SIZE / 2;
@@ -1534,17 +1687,33 @@ class Game {
 			const dy = blockWorldY - this.player.y;
 			const distance = Math.sqrt(dx * dx + dy * dy);
 			
-			if (distance < this.RADAR_RANGE) {
-				const scaleFactor = this.RADAR_RADIUS / this.RADAR_RANGE;
+			if (distance < this.radarRange) {
+				const scaleFactor = this.RADAR_RADIUS / this.radarRange;
 				const blipX = radarCenterX + dx * scaleFactor;
 				const blipY = radarCenterY + dy * scaleFactor;
 				this.engine.drawCircle({ x: blipX, y: blipY }, 3, this.RADAR_BLIP_COLOR);
 			}
 		});
-		
+
+		this.enemies.forEach(worm => {
+			for (let i = worm.segments.length - 1; i >= 0; i--) {
+				const segment = worm.segments[i];
+				const dx = segment.x - this.player.x;
+				const dy = segment.y - this.player.y;
+				const distance = Math.sqrt(dx * dx + dy * dy);
+				
+				if (distance < this.radarRange) {
+					const scaleFactor = this.RADAR_RADIUS / this.radarRange;
+					const blipX = radarCenterX + dx * scaleFactor;
+					const blipY = radarCenterY + dy * scaleFactor;
+					const blipSize = (i === 0) ? 4 : 2;
+					this.engine.drawCircle({ x: blipX, y: blipY }, blipSize, this.RADAR_ENEMY_COLOR);
+				}
+			}
+		});
+
 		let closestBlock = null;
 		let closestDistanceSq = Infinity;
-
 		this.powerBlocks.forEach(block => {
 			const blockWorldX = block.x * this.TILE_SIZE + this.TILE_SIZE / 2;
 			const blockWorldY = block.y * this.TILE_SIZE + this.TILE_SIZE / 2;

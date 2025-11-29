@@ -51,12 +51,17 @@ class Js2d {
 	audioCtx = null;
 	keysPressed = {};
 	masterVolume = 1.0;
-	mousePos = {x: 0, y: 0};
+
+	mousePos = { x: 0, y: 0 };
+    mouseButtons = [false, false, false]; // [izquierdo, medio, derecho]
+    mouseWheelDelta = 0;
 	
+	// Propiedades para el contador de FPS
 	#lastFrameTime = 0;
 	#frameCount = 0;
 	#fps = 0;
 	
+	// --- Propiedades para Simplex Noise ---
 	#p = [151, 160, 137, 91, 90, 15, 131, 13, 201, 95, 96, 53, 194, 233, 7, 225, 140, 36, 103, 30, 69, 142, 8, 99, 37, 240, 21, 10, 23, 190, 6, 148, 247, 120, 234, 75, 0, 26, 197, 62, 94, 252, 219, 203, 117, 35, 11, 32, 57, 177, 33, 88, 237, 149, 56, 87, 174, 20, 125, 136, 171, 168, 68, 175, 74, 165, 71, 134, 139, 48, 27, 166, 77, 146, 158, 231, 83, 111, 229, 122, 60, 211, 133, 230, 220, 105, 92, 41, 55, 46, 245, 40, 244, 102, 143, 54, 65, 25, 63, 161, 1, 216, 80, 73, 209, 76, 132, 187, 208, 89, 18, 169, 200, 196, 135, 130, 116, 188, 159, 86, 164, 100, 109, 198, 173, 186, 3, 64, 52, 217, 226, 250, 124, 123, 5, 202, 38, 147, 118, 126, 255, 82, 85, 212, 207, 206, 59, 227, 47, 16, 58, 17, 182, 189, 28, 42, 223, 183, 170, 213, 119, 248, 152, 2, 44, 154, 163, 70, 221, 153, 101, 155, 167, 43, 172, 9, 129, 22, 39, 253, 19, 98, 108, 110, 79, 113, 224, 232, 178, 185, 112, 104, 218, 246, 97, 228, 251, 34, 242, 193, 238, 210, 144, 12, 191, 179, 162, 241, 81, 51, 145, 235, 249, 14, 239, 107, 49, 192, 214, 31, 181, 199, 106, 157, 184, 84, 204, 176, 115, 121, 50, 45, 127, 4, 150, 254, 138, 236, 205, 93, 222, 114, 67, 29, 24, 72, 243, 141, 128, 195, 78, 66, 215, 61, 156, 180];
 	#perm = new Array(512);
 	#permMod12 = new Array(512);
@@ -69,8 +74,11 @@ class Js2d {
 	constructor(canvas) {
 		this.canvas = canvas;
 		this.ctx = canvas.getContext('2d');
+		this.tilesets = {};
+
 		this.initListeners();
 		
+		// Inicializar tablas de permutación para Simplex Noise
 		for (let i = 0; i < 512; i++) {
 			this.#perm[i] = this.#p[i & 255];
 			this.#permMod12[i] = this.#perm[i] % 12;
@@ -89,22 +97,68 @@ class Js2d {
 	}
 
 	initListeners() {
-		window.addEventListener('mousedown', () => this.initAudio(), { once: true });
-		window.addEventListener('mousemove', e => {
-			this.mousePos = {
-				x: e.mouseX,
-				y: e.mouseY
-			}
-		});
+		// Mover mouse
+		this.canvas.addEventListener('mousemove', e => {
+	        const rect = this.canvas.getBoundingClientRect();
+	        this.mousePos.x = e.clientX - rect.left;
+	        this.mousePos.y = e.clientY - rect.top;
+	    });
 
+	    // Clics (presionar)
+		window.addEventListener('mousedown', () => this.initAudio(), { once: true });
+	    this.canvas.addEventListener('mousedown', e => {
+	        if (e.button >= 0 && e.button < 3) { // 0: izq, 1: medio, 2: der
+	            this.mouseButtons[e.button] = true;
+	        }
+	    });
+
+	    // Clics (soltar)
+	    this.canvas.addEventListener('mouseup', e => {
+	        if (e.button >= 0 && e.button < 3) {
+	            this.mouseButtons[e.button] = false;
+	        }
+	    });
+
+	    // Rueda del ratón
+	    this.canvas.addEventListener('wheel', e => {
+	        e.preventDefault(); // Evita que la página haga scroll
+	        this.mouseWheelDelta = Math.sign(e.deltaY); // -1/1
+	    });
+
+	    // Clic derecho
+	    this.canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+		// Teclado
 		window.addEventListener('keydown', e => {
 			this.initAudio();
 			this.keysPressed[e.code] = true;
-		}, { once: true });
+			
+			if (e.code === 'Tab') {
+				e.preventDefault();
+			}
+		});
+    	window.addEventListener('keyup', e => { delete this.keysPressed[e.code]; });
 
-		window.addEventListener('keydown', e => { this.keysPressed[e.code] = true; });
-		window.addEventListener('keyup', e => { this.keysPressed[e.code] = false; });
-		window.addEventListener('resize', () => this.resizeCanvas(this.canvas));
+		window.addEventListener('resize', () => this.resizeCanvas());
+	}
+
+	getMousePosition() {
+	    return { ...this.mousePos }; // Copia
+	}
+
+	getMouseWheelDelta() {
+		// No modificar sin saber
+	    const delta = this.mouseWheelDelta;
+	    this.mouseWheelDelta = 0;
+	    return delta;
+	}
+
+	getCanvasRectangle(){
+		return {
+			x: 0, y: 0,
+			width: js2d.getCanvasWidth(),
+			height: js2d.getCanvasHeight()
+		};
 	}
 
 	getCanvasWidth(){
@@ -135,6 +189,7 @@ class Js2d {
 		try {
 			const clipboardItems = await navigator.clipboard.read();
 			for (const clipboardItem of clipboardItems) {
+				// Check if the clipboard item contains an image type
 				const imageType = clipboardItem.types.find(type => type.startsWith('image/'));
 
 				if (imageType) {
@@ -150,12 +205,12 @@ class Js2d {
 	}
 
 	 isKeyPressed(key) {
-        return this.keysPressed[key] === true;
-    }
+		return this.keysPressed[key] === true;
+	}
 
-	resizeCanvas(canvas) {
-		canvas.width = window.innerWidth;
-		canvas.height = window.innerHeight;
+	resizeCanvas() {
+		this.canvas.width = window.innerWidth;
+		this.canvas.height = window.innerHeight;
 	}
 
 	tick(timestamp) {
@@ -194,6 +249,7 @@ class Js2d {
 		this.drawLine({ x: rect.x, y: rect.y + height }, { x: rect.x + width, y: rect.y }, thickness, color)
 	}
 
+	// Todos los rectángulos se dibujan desde la esquina "superior izquierda"
 	drawRectangle(rect, color = Color.BLACK) {
 		this.ctx.save()
 		this.ctx.strokeStyle = "none"
@@ -227,10 +283,11 @@ class Js2d {
 
 		this.ctx.restore()
 	}
-	drawRectangleRoundedLines(rect, cornerRadius, color = Color.BLACK) {
+	drawRectangleRoundedLines(rect, cornerRadius, thickness = 1, color = Color.BLACK) {
 		this.ctx.save()
 
 		this.ctx.strokeStyle = color
+		this.ctx.lineWidth = thickness
 
 		this.ctx.beginPath()
 		this.ctx.roundRect(rect.x, rect.y, rect.width, rect.height, cornerRadius)
@@ -348,6 +405,7 @@ class Js2d {
 		this.ctx.arc(center.x, center.y, radius, startAngle, endAngle);
 		this.ctx.closePath();
 		this.ctx.fill();
+		// this.ctx.rotate(rotation);
 		this.ctx.restore();
 	}
 
@@ -373,6 +431,17 @@ class Js2d {
 		this.ctx.restore()
 	}
 
+	drawDonut(center, outerRadius, innerRadius, startAngle = 0, endAngle = 2 * Math.PI, color = Color.BLACK) {
+		this.ctx.save()
+		this.ctx.fillStyle = color
+		this.ctx.beginPath()
+		this.ctx.arc(center.x, center.y, outerRadius, startAngle, endAngle)
+		this.ctx.arc(center.x, center.y, innerRadius, endAngle, startAngle, true)
+		this.ctx.closePath()
+		this.ctx.fill()
+		this.ctx.restore()
+	}
+
 	drawLine(p1, p2, thickness, color = Color.BLACK, cap = Line_Cap.Butt) {
 		this.ctx.save()
 		this.ctx.lineWidth = thickness
@@ -395,22 +464,48 @@ class Js2d {
 		this.ctx.stroke()
 		this.ctx.restore()
 	}
+
+	beginClippingRect(rect) {
+		this.ctx.save();
+		this.ctx.beginPath();
+		this.ctx.rect(rect.x, rect.y, rect.width, rect.height);
+		this.ctx.clip();
+	}
+	endClipping(){
+		this.ctx.restore();
+	}
 	drawTextCustom(font, text, size, color, pos, alignment = "left") {
-	    this.ctx.save();
+		this.ctx.save();
 
-	    if (!font || !font.family) {
-	        if (!font) {
-	            console.warn("[Js2d] Intento de usar una fuente nula. Se usará la fuente por defecto.");
-	        }
-	        this.ctx.font = `${size}px monospace`;
-	    } else {
-	        this.ctx.font = `${size}px "${font.family}"`;
-	    }
+		if (!font || !font.fontFamily) {
+			if (!font) {
+				console.warn("[Js2d] Intento de usar una fuente nula. Se usará la fuente por defecto.");
+			}
+			this.ctx.font = `${size}px monospace`;
+		} else {
+			this.ctx.font = `${size}px "${font.fontFamily}"`;
+		}
 
-	    this.ctx.textAlign = alignment;
-	    this.ctx.fillStyle = color;
-	    this.ctx.fillText(text, pos.x, pos.y);
-	    this.ctx.restore();
+		this.ctx.textAlign = alignment;
+		this.ctx.fillStyle = color;
+		this.ctx.fillText(text, pos.x, pos.y);
+		this.ctx.restore();
+	}
+	measureTextCustom(font, text, size) {
+		this.ctx.save();
+
+		if (!font || !font.fontFamily) {
+			if (!font) {
+				console.warn("[Js2d] Intento de usar una fuente nula. Se usará la fuente por defecto.");
+			}
+			this.ctx.font = `${size}px monospace`;
+		} else {
+			this.ctx.font = `${size}px "${font.fontFamily}"`;
+		}
+
+		const metrics = this.ctx.measureText(text);
+		this.ctx.restore();
+		return metrics.width;
 	}
 	loadFont(name, path) {
 		const customFont = new FontFace(name, `url(${path})`)
@@ -419,7 +514,7 @@ class Js2d {
 			.then((font) => {
 				document.fonts.add(font)
 				console.log(`[Js2d] Fuente "${name}" cargada correctamente desde "${path}"`)
-				return customFont
+				return { fontFamily: name }
 			})
 			.catch((error) => {
 				console.error(`[Js2d] La fuente "${name}" no se pudo cargar:`, error)
@@ -496,75 +591,81 @@ class Js2d {
 	}
 
 	drawTextWrapped(font, text, x, y, maxWidth, lineHeight, lineSpacing, alignment = "left", color = Color.BLACK) {
-	    let drawX;
-	    switch (alignment) {
-	        case "center":
-	            drawX = x + (maxWidth / 2);
-	            break;
-	        case "right":
-	            drawX = x + maxWidth;
-	            break;
-	        case "left":
-	        default:
-	            drawX = x;
-	            break;
-	    }
-	    
-	    if (font && font.family) {
-	        this.ctx.font = `${lineHeight}px "${font.family}"`;
-	    } else {
-	        this.ctx.font = `${lineHeight}px monospace`;
-	    }
+		let drawX;
+		switch (alignment) {
+			case "center":
+				drawX = x + (maxWidth / 2);
+				break;
+			case "right":
+				drawX = x + maxWidth;
+				break;
+			case "left":
+			default:
+				drawX = x;
+				break;
+		}
+		
+		if (font && font.fontFamily) {
+			this.ctx.font = `${lineHeight}px "${font.fontFamily}"`;
+		} else {
+			// Fallback
+			this.ctx.font = `${lineHeight}px monospace`;
+		}
 
-	    const words = text.split(' ');
-	    let line = '';
+		const words = text.split(' ');
+		let line = '';
+		let lineCount = 1;
 
-	    for (let n = 0; n < words.length; n++) {
-	        const testLine = line + words[n] + ' ';
-	        const metrics = this.ctx.measureText(testLine);
-	        const testWidth = metrics.width;
+		for (let n = 0; n < words.length; n++) {
+			const testLine = line + words[n] + ' ';
+			const metrics = this.ctx.measureText(testLine);
+			const testWidth = metrics.width;
 
-	        if (testWidth > maxWidth && n > 0) {
-	            this.drawTextCustom(font, line.trim(), lineHeight, color, { x: drawX, y: y }, alignment);
-	            
-	            line = words[n] + ' ';
-	            y += lineSpacing;
-	        } else {
-	            line = testLine;
-	        }
-	    }
+			if (testWidth > maxWidth && n > 0) {
+				this.drawTextCustom(font, line.trim(), lineHeight, color, { x: drawX, y: y }, alignment);
+				
+				line = words[n] + ' ';
+				y += lineSpacing;
+				lineCount++;
+			} else {
+				line = testLine;
+			}
+		}
 
-	    this.drawTextCustom(font, line.trim(), lineHeight, color, { x: drawX, y: y }, alignment);
+		this.drawTextCustom(font, line.trim(), lineHeight, color, { x: drawX, y: y }, alignment);
+		return lineCount;
 	}
 
 	countWrappedLines(font, text, maxWidth, fontSize, lineSpacing) {
-        if (!text || text.length === 0) return 0;
-        const ctx = this.ctx;
-        
-        const originalFont = ctx.font; 
+		if (!text || text.length === 0) return 0;
+		const ctx = this.ctx; // Accede al contexto de dibujo de Js2d
+		
+		// Guarda el estado actual de la fuente
+		const originalFont = ctx.font; 
 
-        ctx.font = `${fontSize}px ${font.fontFamily}`;
+		ctx.font = `${fontSize}px "${font.fontFamily}"`;
 
-        const words = text.split(' ');
-        let currentLine = '';
-        let numLines = 1;
+		const words = text.split(' ');
+		let currentLine = '';
+		let numLines = 1;
 
-        for (let i = 0; i < words.length; i++) {
-            const word = words[i];
-            const testLine = currentLine.length === 0 ? word : currentLine + ' ' + word;
-            const metrics = ctx.measureText(testLine);
-            if (metrics.width > maxWidth && currentLine.length > 0) {
-                numLines++;
-                currentLine = word;
-            } else {
-                currentLine = testLine;
-            }
-        }
-        
-        ctx.font = originalFont;
+		for (let i = 0; i < words.length; i++) {
+			const word = words[i];
+			const testLine = currentLine.length === 0 ? word : currentLine + ' ' + word;
+			const metrics = ctx.measureText(testLine);
+			if (metrics.width > maxWidth && currentLine.length > 0) {
+				numLines++;
+				currentLine = word;
+			} else {
+				currentLine = testLine;
+			}
+		}
+		
+		// Restaura el estado original de la fuente
+		ctx.font = originalFont;
 
-        return numLines;
-    }
+		return numLines;
+	}
 
 	loadImages(imagePaths) {
 		const promises = imagePaths.map((path) => {
@@ -599,9 +700,11 @@ class Js2d {
 			image.onerror = () => {
 				const errorMsg = `[Js2d] Error cargando imagen desde ruta: ${path}`;
 				console.warn(errorMsg);
+				// La promesa falla y devuelve un error
 				reject(new Error(errorMsg)); 
 			};
 
+			// Inicia la carga de la imagen
 			image.src = path;
 		});
 	}
@@ -649,7 +752,7 @@ class Js2d {
 		}
 
 		if (!imageElement || !imageElement._loaded) {
-			console.warn("[Js2d] drawImage: La imagen no está cargada o es inválida.", imageElement);
+			console.warn("[Js2d] drawImage: La imagen no está cargada o es inválida.");
 			return;
 		}
 
@@ -700,56 +803,157 @@ class Js2d {
 		this.ctx.restore()
 	}
 
+	npatches = {}
+
+	loadNPatch(name, image, left, top, right, bottom) {
+		if (!image || !image._loaded) {
+			console.warn(`[Js2d] loadNPatch: Imagen no válida o no cargada para NPatch "${name}".`);
+			return;
+		}
+
+		this.npatches[name] = {
+			image: image,
+			left: left,
+			top: top,
+			right: right,
+			bottom: bottom,
+			width: image._w,
+			height: image._h
+		};
+	}
+
+	drawNPatch(npatchNameOrData, pos, size, options = {}) {
+		let npatchData;
+
+		if (typeof npatchNameOrData === 'string') {
+			npatchData = this.npatches[npatchNameOrData];
+			if (!npatchData) {
+				console.warn(`[Js2d] drawNPatch: NPatch "${npatchNameOrData}" no encontrado.`);
+				return;
+			}
+		} else if (npatchNameOrData && npatchNameOrData.image) {
+			npatchData = npatchNameOrData;
+		} else {
+			console.warn("[Js2d] drawNPatch: Datos de NPatch inválidos.");
+			return;
+		}
+
+		const image = npatchData.image;
+		const srcLeft = npatchData.left;
+		const srcTop = npatchData.top;
+		const srcRight = npatchData.right;
+		const srcBottom = npatchData.bottom;
+		const srcWidth = npatchData.width;
+		const srcHeight = npatchData.height;
+		const scale = options.scale || 1;
+
+		const centerWidth = srcWidth - srcLeft - srcRight;
+		const centerHeight = srcHeight - srcTop - srcBottom;
+
+		const dstWidth = size.width;
+		const dstHeight = size.height;
+
+		const dstLeft = Math.round((options.left || srcLeft) * scale);
+		const dstTop = Math.round((options.top || srcTop) * scale);
+		const dstRight = Math.round((options.right || srcRight) * scale);
+		const dstBottom = Math.round((options.bottom || srcBottom) * scale);
+
+		const dstCenterWidth = dstWidth - dstLeft - dstRight;
+		const dstCenterHeight = dstHeight - dstTop - dstBottom;
+
+		this.ctx.imageSmoothingEnabled = false;
+		this.ctx.save();
+
+		const x = Math.round(pos.x);
+		const y = Math.round(pos.y);
+
+		const parts = [
+			{ sx: 0, sy: 0, sw: srcLeft, sh: srcTop, dx: x, dy: y, dw: dstLeft, dh: dstTop },
+			{ sx: srcLeft, sy: 0, sw: centerWidth, sh: srcTop, dx: Math.round(x + dstLeft), dy: y, dw: dstCenterWidth, dh: dstTop },
+			{ sx: srcWidth - srcRight, sy: 0, sw: srcRight, sh: srcTop, dx: Math.round(x + dstLeft + dstCenterWidth), dy: y, dw: dstRight, dh: dstTop },
+
+			{ sx: 0, sy: srcTop, sw: srcLeft, sh: centerHeight, dx: x, dy: Math.round(y + dstTop), dw: dstLeft, dh: dstCenterHeight },
+			{ sx: srcLeft, sy: srcTop, sw: centerWidth, sh: centerHeight, dx: Math.round(x + dstLeft), dy: Math.round(y + dstTop), dw: dstCenterWidth, dh: dstCenterHeight },
+			{ sx: srcWidth - srcRight, sy: srcTop, sw: srcRight, sh: centerHeight, dx: Math.round(x + dstLeft + dstCenterWidth), dy: Math.round(y + dstTop), dw: dstRight, dh: dstCenterHeight },
+
+			{ sx: 0, sy: srcHeight - srcBottom, sw: srcLeft, sh: srcBottom, dx: x, dy: Math.round(y + dstTop + dstCenterHeight), dw: dstLeft, dh: dstBottom },
+			{ sx: srcLeft, sy: srcHeight - srcBottom, sw: centerWidth, sh: srcBottom, dx: Math.round(x + dstLeft), dy: Math.round(y + dstTop + dstCenterHeight), dw: dstCenterWidth, dh: dstBottom },
+			{ sx: srcWidth - srcRight, sy: srcHeight - srcBottom, sw: srcRight, sh: srcBottom, dx: Math.round(x + dstLeft + dstCenterWidth), dy: Math.round(y + dstTop + dstCenterHeight), dw: dstRight, dh: dstBottom }
+		];
+
+		for (const part of parts) {
+			if (part.sw > 0 && part.sh > 0 && part.dw > 0 && part.dh > 0) {
+				this.ctx.drawImage(image, part.sx, part.sy, part.sw, part.sh, Math.round(part.dx), Math.round(part.dy), Math.round(part.dw), Math.round(part.dh));
+			}
+		}
+
+		this.ctx.restore();
+	}
+
 	loadAudio(path) {
 		return new Audio(path)
 	}
 
 	playAudio(audio, loop = false, onEndCallback = null) {
-		audio.loop = loop;
-		const playPromise = audio.play();
+		if (!audio) return;
 
-		if (playPromise !== undefined) {
-			playPromise.catch((error) => {
-				//
-			});
-		}
+		audio.volume = this.masterVolume; // Aplica el volumen maestro siempre
+		audio.loop = loop;
 
 		if (onEndCallback && !loop) {
-			audio.addEventListener('ended', onEndCallback, { once: true });
+			const callbackWrapper = () => {
+				onEndCallback();
+				audio.removeEventListener('ended', callbackWrapper);
+			};
+			audio.addEventListener('ended', callbackWrapper, { once: true });
+		}
+
+		const playPromise = audio.play();
+		if (playPromise !== undefined) {
+			playPromise.catch(error => {});
+		}
+	}
+
+	playAudioOverlap(audio) {
+		if (audio && audio.src) {
+			const clone = audio.cloneNode();
+			clone.volume = this.masterVolume; // Aplica el volumen maestro a los clones
+			clone.play();
 		}
 	}
 	setVolume(audio, vol = 1) {
 		audio.volume = vol * this.masterVolume;
 	}
 	stopAudio(audio) {
-		audio.pause();
-		audio.currentTime = 0;
+		if (audio && typeof audio.pause === 'function') {
+			audio.pause();
+			audio.currentTime = 0;
+		}
 	}
 	pauseAudio(audio) {
-		miAudio.pause();
+		if (audio && typeof audio.pause === 'function') {
+			audio.pause();
+		}
 	}
 	setMasterVolume(volume) {
-        this.masterVolume = Math.max(0, Math.min(1, volume));
-    }
+		this.masterVolume = Math.max(0, Math.min(1, volume));
+	}
 
 	playSoundEffect({ frequency = 440, duration = 0.1, volume = 0.5, type = 'sine', attack = 0.01, release = 0.1 }) {
-		if (!this.audioCtx) {
-			console.warn("[Js2d] El AudioContext no está listo. No se puede reproducir el sonido.");
-			return;
-		}
+		if (!this.audioCtx) return;
 
 		const now = this.audioCtx.currentTime;
-	    const gainNode = this.audioCtx.createGain();
-	    gainNode.connect(this.audioCtx.destination);
+		const gainNode = this.audioCtx.createGain();
+		gainNode.connect(this.audioCtx.destination);
 
-	    const finalVolume = volume * this.masterVolume;
+		const finalVolume = volume * this.masterVolume;
 
-	    gainNode.gain.setValueAtTime(0, now);
-	    gainNode.gain.linearRampToValueAtTime(finalVolume, now + attack);
-	    
-	    const releaseStart = Math.max(now + attack, now + duration - release);
-	    gainNode.gain.setValueAtTime(finalVolume, releaseStart);
-	    gainNode.gain.linearRampToValueAtTime(0, releaseStart + release);
+		gainNode.gain.setValueAtTime(0, now);
+		gainNode.gain.linearRampToValueAtTime(finalVolume, now + attack);
+		
+		const releaseStart = Math.max(now + attack, now + duration - release);
+		gainNode.gain.setValueAtTime(finalVolume, releaseStart);
+		gainNode.gain.linearRampToValueAtTime(0, releaseStart + release);
 
 		const oscillator = this.audioCtx.createOscillator();
 		oscillator.type = type;
@@ -770,7 +974,7 @@ class Js2d {
 
 		this.animations[name].position = position
 		this.animations[name].speed = speed
-		this.animations[name].loop = loop
+		this.animations[name].loop = loop // Store loop setting
 	}
 
 	addFramesToAnimation(name, frames) {
@@ -795,22 +999,22 @@ class Js2d {
 	sprites = {}
 
 	async loadSprite(name, pathOrImage, scale = 1, frameWidth = null, frameHeight = null) {
-	    this.sprites[name] = {};
-	    let image;
+		this.sprites[name] = {};
+		let image;
 
-	    if (pathOrImage instanceof HTMLImageElement) {
-	        image = pathOrImage;
-	        this.sprites[name].path = pathOrImage.src || "";
-	    } else {
-	        image = await this.loadImage(pathOrImage);
-	        this.sprites[name].path = pathOrImage;
-	    }
-	    
-	    this.sprites[name].image = image;
-	    this.sprites[name].scale = scale;
+		if (pathOrImage instanceof HTMLImageElement) {
+			image = pathOrImage;
+			this.sprites[name].path = pathOrImage.src || "";
+		} else {
+			image = await this.loadImage(pathOrImage);
+			this.sprites[name].path = pathOrImage;
+		}
+		
+		this.sprites[name].image = image;
+		this.sprites[name].scale = scale;
 
-	    this.sprites[name].frameWidth = frameWidth || image._w;
-	    this.sprites[name].frameHeight = frameHeight || image._h;
+		this.sprites[name].frameWidth = frameWidth || image._w;
+		this.sprites[name].frameHeight = frameHeight || image._h;
 	}
 
 	async loadSprites(spriteList) {
@@ -838,78 +1042,126 @@ class Js2d {
 		}
 	}
 
-	drawSprite(image, frame = 0, pos, scale = 1, flipped = false, rotation = 0, pivot = Pivot.Center) {
-	    let spriteInfo = null;
-	    for (const key in this.sprites) {
-	        if (this.sprites[key].image === image) {
-	            spriteInfo = this.sprites[key];
-	            break;
-	        }
-	    }
+	async loadTileset(name, path, tileWidth, tileHeight) {
+		try {
+			const image = await this.loadImage(path);
+			this.tilesets[name] = {
+				image: image,
+				tileWidth: tileWidth,
+				tileHeight: tileHeight
+			};
+			console.log(`[Js2d] Tileset "${name}" cargado correctamente.`);
+			return this.tilesets[name];
+		} catch (error) {
+			console.error(`[Js2d] No se pudo cargar el tileset "${name}".`, error);
+			return null;
+		}
+	}
 
-	    if (!image) return;
-	    const loaded = image._loaded || (image.complete && image.naturalWidth);
-	    if (!loaded) return;
+	defineSpriteFromTileset(spriteName, tilesetName, tileX, tileY, numFrames = 1, scale = 1) {
+		if (!this.tilesets[tilesetName]) {
+			console.error(`[Js2d] No se puede definir el sprite "${spriteName}" porque el tileset "${tilesetName}" no existe.`);
+			return;
+		}
 
-	    this.ctx.imageSmoothingEnabled = IMAGE_SMOOTHING;
+		this.sprites[spriteName] = {
+			tilesetName: tilesetName,
+			tileX: tileX, // Coordenada X del primer fotograma (en tiles)
+			tileY: tileY, // Coordenada Y del primer fotograma (en tiles)
+			numFrames: numFrames,
+			scale: scale
+		};
+	}
 
-	    const iw = image._w || image.naturalWidth;
-	    const ih = image._h || image.naturalHeight;
+	drawSprite(imageOrSpriteName, frame = 0, pos, scale = 1, flipped = false, rotation = 0, pivot = Pivot.Center) {
+		let spriteInfo = null;
+		let image;
 
-	    let sWidth, sHeight, dx, dy;
+		// Primero, determinamos si estamos trabajando con un nombre de sprite o una imagen directa.
+		if (typeof imageOrSpriteName === 'string') {
+			spriteInfo = this.sprites[imageOrSpriteName];
+		} else if (imageOrSpriteName instanceof HTMLImageElement) {
+			image = imageOrSpriteName;
+			// Buscamos si hay info de sprite asociada a esta imagen
+			for (const key in this.sprites) {
+				if (this.sprites[key].image === image) {
+					spriteInfo = this.sprites[key];
+					break;
+				}
+			}
+		}
 
-	    if (spriteInfo && spriteInfo.frameWidth) {
-	        sWidth = spriteInfo.frameWidth;
-	        sHeight = spriteInfo.frameHeight || ih;
-	        const framesPerRow = Math.floor(iw / sWidth);
-	        const row = Math.floor(frame / framesPerRow);
-	        const col = frame % framesPerRow;
-	        dx = col * sWidth;
-	        dy = row * sHeight;
-	    } else {
-	        sWidth = iw;
-	        sHeight = ih;
-	        dx = 0;
-	        dy = 0;
-	    }
-	    
-	    const dWidth = sWidth * scale;
-	    const dHeight = sHeight * scale;
-	    
-	    this.ctx.save();
-	    
-	    this.ctx.translate(Math.round(pos.x), Math.round(pos.y));
-	    
-	    if (rotation !== 0) {
-	        this.ctx.rotate(this.toRadians(rotation));
-	    }
-	    
-	    let drawOffsetX = 0;
-	    let drawOffsetY = 0;
+		if (!image && !spriteInfo) return; // No se puede dibujar nada.
 
-	    switch(pivot) {
-	        case Pivot.Top_Left:      break;
-	        case Pivot.Top_Center:    drawOffsetX = -dWidth / 2; break;
-	        case Pivot.Top_Right:     drawOffsetX = -dWidth; break;
-	        case Pivot.Center_Left:   drawOffsetY = -dHeight / 2; break;
-	        case Pivot.Center:        drawOffsetX = -dWidth / 2; drawOffsetY = -dHeight / 2; break;
-	        case Pivot.Center_Right:  drawOffsetX = -dWidth; drawOffsetY = -dHeight / 2; break;
-	        case Pivot.Bottom_Left:   drawOffsetY = -dHeight; break;
-	        case Pivot.Bottom_Center: drawOffsetX = -dWidth / 2; drawOffsetY = -dHeight; break;
-	        case Pivot.Bottom_Right:  drawOffsetX = -dWidth; drawOffsetY = -dHeight; break;
-	        default:                  drawOffsetX = -dWidth / 2; drawOffsetY = -dHeight / 2; break;
-	    }
+		let sx, sy, sWidth, sHeight; // Coordenadas y tamaño del recorte (Source)
 
-	    if (flipped) {
-	        this.ctx.scale(-1, 1);
-	        drawOffsetX *= -1;
-	    }
+		if (spriteInfo && spriteInfo.tilesetName) {
+			// Sprite de un Tileset
+			const tileset = this.tilesets[spriteInfo.tilesetName];
+			if (!tileset) return;
 
-	    this.ctx.drawImage(image, dx, dy, sWidth, sHeight, 
-	        Math.round(drawOffsetX), Math.round(drawOffsetY), 
-	        dWidth, dHeight);
-	    
-	    this.ctx.restore();
+			image = tileset.image;
+			sWidth = tileset.tileWidth;
+			sHeight = tileset.tileHeight;
+
+			// Calculamos el recorte basado en las coordenadas del tile + el frame de la animación
+			const framesPerRow = Math.floor(image._w / sWidth);
+			const startTileIndex = spriteInfo.tileY * framesPerRow + spriteInfo.tileX;
+			const currentTileIndex = startTileIndex + frame;
+			
+			sx = (currentTileIndex % framesPerRow) * sWidth;
+			sy = Math.floor(currentTileIndex / framesPerRow) * sHeight;			
+		} else {
+			// Imagen suelta
+			if (!image) image = spriteInfo.image; // Aseguramos que tenemos la imagen
+			if (!image || !image._loaded) return;
+
+			sWidth = (spriteInfo && spriteInfo.frameWidth) ? spriteInfo.frameWidth : image._w;
+			sHeight = (spriteInfo && spriteInfo.frameHeight) ? spriteInfo.frameHeight : image._h;
+			
+			const framesPerRow = Math.floor(image._w / sWidth);
+			const col = frame % framesPerRow;
+			const row = Math.floor(frame / framesPerRow);
+			sx = col * sWidth;
+			sy = row * sHeight;
+		}
+		
+		this.ctx.imageSmoothingEnabled = IMAGE_SMOOTHING;
+
+		const dWidth = sWidth * scale;
+		const dHeight = sHeight * scale;
+
+		this.ctx.save();
+		this.ctx.translate(Math.round(pos.x), Math.round(pos.y));
+
+		if (rotation !== 0) {
+			this.ctx.rotate(this.toRadians(rotation));
+		}
+		
+		let drawOffsetX = 0;
+		let drawOffsetY = 0;
+
+		switch(pivot) {
+			case Pivot.Top_Center:    drawOffsetX = -dWidth / 2; break;
+			case Pivot.Top_Right:     drawOffsetX = -dWidth; break;
+			case Pivot.Center_Left:   drawOffsetY = -dHeight / 2; break;
+			case Pivot.Center:        drawOffsetX = -dWidth / 2; drawOffsetY = -dHeight / 2; break;
+			case Pivot.Center_Right:  drawOffsetX = -dWidth; drawOffsetY = -dHeight / 2; break;
+			case Pivot.Bottom_Left:   drawOffsetY = -dHeight; break;
+			case Pivot.Bottom_Center: drawOffsetX = -dWidth / 2; drawOffsetY = -dHeight; break;
+			case Pivot.Bottom_Right:  drawOffsetX = -dWidth; drawOffsetY = -dHeight; break;
+		}
+
+		if (flipped) {
+			this.ctx.scale(-1, 1);
+			drawOffsetX = -drawOffsetX - dWidth;
+		}
+
+		this.ctx.drawImage(image, sx, sy, sWidth, sHeight, 
+			Math.round(drawOffsetX), Math.round(drawOffsetY), 
+			dWidth, dHeight);
+		
+		this.ctx.restore();
 	}
 	
 	animatedSprites = {}
@@ -974,7 +1226,7 @@ class Js2d {
 		}
 	}
 
-	drawAnimatedSprite(name) {
+	drawAnimatedSprite(name, pivot = Pivot.Center) {
 		const sprite = this.animatedSprites[name]
 		if (!sprite || !sprite.currentAnimation) return
 
@@ -994,10 +1246,11 @@ class Js2d {
 		}
 		sprite.frameCounter++
 
+		// Dibujo
 		const spriteData = this.sprites[sprite.spriteName]
 		const frame = animation.frames[sprite.currentFrame]
 
-		this.drawSprite(spriteData.image, frame, sprite.position, sprite.scale, sprite.flipped)
+		this.drawSprite(sprite.spriteName, frame, sprite.position, sprite.scale, sprite.flipped, 0, pivot)
 	}
 
 	getCurrentFrame(name) {
@@ -1013,6 +1266,27 @@ class Js2d {
 	//
 	// Herramientas
 	//
+
+	setCookie(name, value, days) {
+		let expires = "";
+		if (days) {
+			const date = new Date();
+			date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+			expires = "; expires=" + date.toUTCString();
+		}
+		document.cookie = name + "=" + (value || "")  + expires + "; path=/";
+	}
+
+	getCookie(name) {
+		const nameEQ = name + "=";
+		const ca = document.cookie.split(';');
+		for(let i = 0; i < ca.length; i++) {
+			let c = ca[i];
+			while (c.charAt(0) == ' ') c = c.substring(1, c.length); // Quita espacios en blanco
+			if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length, c.length);
+		}
+		return null;
+	}
 
 	getFileExtention(filename) {
 		const parts = filename.split(".")
@@ -1082,6 +1356,7 @@ class Js2d {
 		const closestX = Math.max(rect.x, Math.min(circle.x, rect.x + rect.width));
 		const closestY = Math.max(rect.y, Math.min(circle.y, rect.y + rect.height));
 
+		// Calcular la distancia entre el punto más cercano y el centro del círculo
 		const dx = circle.x - closestX;
 		const dy = circle.y - closestY;
 		const distanceSquared = (dx * dx) + (dy * dy);
@@ -1255,6 +1530,7 @@ class Js2d {
 	}
 
 	hexToRgb(hex) {
+		// Expande el formato corto (ej. "03F") al formato completo (ej. "0033FF")
 		const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
 		hex = hex.replace(shorthandRegex, function(m, r, g, b) {
 			return r + r + g + g + b + b;
@@ -1274,7 +1550,7 @@ class Js2d {
 		let h, s, l = (max + min) / 2;
 
 		if (max === min) {
-			h = s = 0;
+			h = s = 0; // Acromático
 		} else {
 			const d = max - min;
 			s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
@@ -1291,7 +1567,7 @@ class Js2d {
 	hslToRgb(h, s, l) {
 		let r, g, b;
 		if (s === 0) {
-			r = g = b = l;
+			r = g = b = l; // Acromático
 		} else {
 			const hue2rgb = (p, q, t) => {
 				if (t < 0) t += 1;
@@ -1312,6 +1588,27 @@ class Js2d {
 			g: Math.round(g * 255),
 			b: Math.round(b * 255)
 		};
+	}
+
+	lerpColor(color1, color2, t) {
+		const parseColor = (color) => {
+			if (color.startsWith('#')) {
+				const hex = color.slice(1);
+				return {
+					r: parseInt(hex.substr(0, 2), 16),
+					g: parseInt(hex.substr(2, 2), 16),
+					b: parseInt(hex.substr(4, 2), 16)
+				};
+			}
+			if (color === 'white') return { r: 255, g: 255, b: 255 };
+			return { r: 255, g: 255, b: 255 };
+		};
+		const c1 = parseColor(color1);
+		const c2 = parseColor(color2);
+		const r = Math.round(c1.r + (c2.r - c1.r) * t);
+		const g = Math.round(c1.g + (c2.g - c1.g) * t);
+		const b = Math.round(c1.b + (c2.b - c1.b) * t);
+		return `rgb(${r}, ${g}, ${b})`;
 	}
 
 	noise2D(xin, yin) {
